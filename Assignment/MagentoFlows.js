@@ -1,233 +1,105 @@
-"use strict";
+import time
+from faker import Faker
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from webdriver_manager.chrome import ChromeDriverManager
 
-const puppeteer = require("puppeteer-extra");
-const { faker } = require("@faker-js/faker");
-// Add stealth plugin and use defaults (all tricks to hide puppeteer usage)
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-puppeteer.use(StealthPlugin());
-
-// Add adblocker plugin to block all ads and trackers (saves bandwidth)
-const AdblockerPlugin = require("puppeteer-extra-plugin-adblocker");
-puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
-
-async function testMagentoFlows() {
-  const browser = await puppeteer.launch({
-    headless: false,
-    slowMo: 100,
-    args: ["--start-maximized"],
-  });
-
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1366, height: 768 });
-
-  // Generate test data
-  const testUser = {
-    firstName: faker.person.firstName(),
-    lastName: faker.person.lastName(),
-    email: faker.internet.email(),
-    password: "TestPassword123!",
-  };
-
-  console.log("Test User:", testUser);
-
-  try {
-    // Navigate to Magento demo site
-    console.log("🌐 Navigating to Magento demo site...");
-    await page.goto("https://magento.softwaretestingboard.com/", {
-      waitUntil: "networkidle2",
-    });
-
-    // ========================
-    // 1. SIGNUP FLOW
-    // ========================
-    console.log("📝 Starting signup flow...");
-
-    // Click on "Create an Account" link
-    await page.waitForSelector('a[href*="create"]');
-    await page.click('a[href*="create"]');
-
-    // Fill signup form
-    await page.waitForSelector("#firstname");
-    await page.type("#firstname", testUser.firstName);
-    await page.type("#lastname", testUser.lastName);
-    await page.type("#email_address", testUser.email);
-    await page.type("#password", testUser.password);
-    await page.type("#password-confirmation", testUser.password);
-
-    // Submit signup form
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2" }),
-      page.click('button[title="Create an Account"]'),
-    ]);
-
-    // Verify successful signup
-    const accountCreated = await page.evaluate(() => {
-      const welcomeText = document.querySelector(".page-title");
-      const panelHeader = document.querySelector(
-        ".panel.header li.greet.welcome"
-      );
-      return {
-        hasWelcome:
-          welcomeText && welcomeText.textContent.includes("My Account"),
-        hasGreeting: panelHeader && panelHeader.textContent.includes("Welcome"),
-      };
-    });
-
-    if (accountCreated.hasWelcome || accountCreated.hasGreeting) {
-      console.log("✅ Signup successful - Account created");
-    } else {
-      throw new Error("❌ Signup verification failed");
+def test_magento_flows():
+    fake = Faker()
+    test_user = {
+        "first_name": fake.first_name(),
+        "last_name":  fake.last_name(),
+        "email":      fake.ascii_email(),
+        "password":   "TestPassword123!"
     }
+    print("Test User:", test_user)
 
-    // ========================
-    // 2. LOGOUT AND LOGIN FLOW
-    // ========================
-    console.log("🔓 Starting logout and login flow...");
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+    driver.maximize_window()
+    wait = WebDriverWait(driver, 20)
 
-    // Logout first
-    await page.waitForSelector(".panel.header .customer-welcome");
-    await page.click(".panel.header .customer-welcome .action.switch");
-    await page.waitForSelector('a[href*="logout"]');
-    await page.click('a[href*="logout"]');
-    await page.waitForNavigation({ waitUntil: "networkidle2" });
+    try:
+        # Navigate
+        print("🌐 Navigating to Magento demo site...")
+        driver.get("https://magento.softwaretestingboard.com/")
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href*="create"]')))
 
-    console.log("Logout successful...");
+        # 1. SIGNUP
+        print("📝 Starting signup flow...")
+        driver.find_element(By.CSS_SELECTOR, 'a[href*="create"]').click()
 
-    // Navigate to login page
-    await page.waitForSelector('a[href*="login"]');
-    await page.click('a[href*="login"]');
-    // await page.waitForNavigation({ waitUntil: "networkidle2" });
+        wait.until(EC.visibility_of_element_located((By.ID, "firstname")))
+        driver.find_element(By.ID, "firstname").send_keys(test_user["first_name"])
+        driver.find_element(By.ID, "lastname").send_keys(test_user["last_name"])
+        driver.find_element(By.ID, "email_address").send_keys(test_user["email"])
+        driver.find_element(By.ID, "password").send_keys(test_user["password"])
+        driver.find_element(By.ID, "password-confirmation").send_keys(test_user["password"])
 
-    console.log("Reached to login page...");
+        driver.find_element(By.CSS_SELECTOR, 'button[title="Create an Account"]').click()
+        wait.until(EC.url_contains('/customer/account'))
 
-    // Fill login form
-    await page.waitForSelector("#email");
-    await page.type("#email", testUser.email);
-    await page.type("#pass", testUser.password);
+        welcome = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".page-title")))
+        greet = driver.find_element(By.CSS_SELECTOR, ".panel.header li.greet.welcome")
+        assert "My Account" in welcome.text or "Welcome" in greet.text
+        print("✅ Signup successful")
 
-    // Submit login form
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2" }),
-      page.click("#send2"),
-    ]);
+        # 2. LOGOUT & LOGIN
+        print("🔓 Starting logout & login flow...")
+        driver.find_element(By.CSS_SELECTOR, ".panel.header .customer-welcome .action.switch").click()
+        wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Sign Out"))).click()
+        wait.until(EC.url_contains("/"))
 
-    // Verify successful login
-    const loginSuccess = await page.evaluate(() => {
-      const welcomePanel = document.querySelector(
-        ".panel.header li.greet.welcome"
-      );
-      return welcomePanel && welcomePanel.textContent.includes("Welcome");
-    });
+        driver.find_element(By.CSS_SELECTOR, 'a[href*="login"]').click()
+        wait.until(EC.visibility_of_element_located((By.ID, "email")))
+        driver.find_element(By.ID, "email").send_keys(test_user["email"])
+        driver.find_element(By.ID, "pass").send_keys(test_user["password"])
+        driver.find_element(By.ID, "send2").click()
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".panel.header li.greet.welcome")))
+        print("✅ Login successful")
 
-    if (loginSuccess) {
-      console.log("✅ Login successful - User authenticated");
-    } else {
-      throw new Error("❌ Login verification failed");
-    }
+        # 3. PASSWORD RESET
+        print("🔑 Starting password reset flow...")
+        driver.find_element(By.CSS_SELECTOR, ".panel.header .customer-welcome .action.switch").click()
+        wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Sign Out"))).click()
+        wait.until(EC.url_contains("/"))
 
-    // ========================
-    // 3. PASSWORD RESET FLOW
-    // ========================
-    console.log("🔑 Starting password reset flow...");
+        driver.find_element(By.CSS_SELECTOR, 'a[href*="login"]').click()
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "a.action.remind"))).click()
 
-    // Logout again
-    await page.click(".panel.header .customer-welcome .action.switch");
-    await page.waitForSelector('a[href*="logout"]');
-    await page.click('a[href*="logout"]');
-    await page.waitForNavigation({ waitUntil: "networkidle2" });
+        wait.until(EC.visibility_of_element_located((By.ID, "email_address"))).send_keys(test_user["email"])
+        driver.find_element(By.CSS_SELECTOR, "button.action.submit.primary").click()
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".message-success")))
+        print("✅ Password reset email sent")
 
-    console.log("Reached to login page...");
-    // Go to login page
-    await page.click('a[href*="login"]');
-    // await page.waitForNavigation({ waitUntil: "networkidle2" });
+        # 4. INVALID LOGIN
+        print("🚫 Testing invalid login...")
+        driver.get("https://magento.softwaretestingboard.com/customer/account/login/")
+        wait.until(EC.visibility_of_element_located((By.ID, "email")))
+        driver.find_element(By.ID, "email").send_keys("invalid@test.com")
+        driver.find_element(By.ID, "pass").send_keys("wrongpassword")
+        driver.find_element(By.ID, "send2").click()
 
-    console.log("Reached to Forgot password page...");
-    // Click forgot password link
-    await page.waitForSelector("a.action.remind");
-    await page.click("a.action.remind");
-    // await page.waitForNavigation({ waitUntil: "networkidle2" });
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".message-error")))
+        print("✅ Invalid login handled correctly")
 
-    console.log("Clicked forgot password successfully...");
+        print("\n🎉 All test flows completed successfully!")
 
-    // Fill password reset form
-    await page.waitForSelector("#email_address");
-    await page.type("#email_address", testUser.email);
+    except AssertionError as ae:
+        print("❌ Assertion failed:", ae)
+        driver.save_screenshot(f"assertion_error_{int(time.time())}.png")
+    except TimeoutException as te:
+        print("❌ Timeout:", te)
+        driver.save_screenshot(f"timeout_error_{int(time.time())}.png")
+    except Exception as e:
+        print("❌ Error:", e)
+        driver.save_screenshot(f"error_{int(time.time())}.png")
+    finally:
+        time.sleep(2)
+        driver.quit()
 
-    // Submit password reset form
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle2" }),
-      page.click("button.action.submit.primary"),
-    ]);
-
-    // Verify password reset email sent
-    const resetSuccess = await page.evaluate(() => {
-      const message = document.querySelector(".page.messages .message-success");
-      return message && message.textContent.includes("email");
-    });
-
-    if (resetSuccess) {
-      console.log("✅ Password reset successful - Reset email sent");
-    } else {
-      throw new Error("❌ Password reset verification failed");
-    }
-
-    // ========================
-    // 4. TEST INVALID LOGIN
-    // ========================
-    console.log("🚫 Testing invalid login...");
-
-    // Go back to login page
-    await page.goto(
-      "https://magento.softwaretestingboard.com/customer/account/login/",
-      {
-        waitUntil: "networkidle2",
-      }
-    );
-
-    // Try invalid credentials
-    await page.type("#email", "invalid@test.com");
-    await page.type("#pass", "wrongpassword");
-    await page.click("#send2");
-
-    // Wait for error message
-    await page.waitForSelector(".page.messages", { timeout: 5000 });
-
-    const invalidLoginHandled = await page.evaluate(() => {
-      const errorMessage = document.querySelector(
-        ".page.messages .message-error"
-      );
-      return errorMessage && errorMessage.textContent.includes("incorrect");
-    });
-
-    if (invalidLoginHandled) {
-      console.log(
-        "✅ Invalid login properly handled - Error message displayed"
-      );
-    } else {
-      console.log("⚠️ Invalid login test - Could not verify error message");
-    }
-
-    console.log("\n🎉 All test flows completed successfully!");
-    console.log("📊 Test Summary:");
-    console.log("   - Account Creation: ✅ Passed");
-    console.log("   - User Login: ✅ Passed");
-    console.log("   - Password Reset: ✅ Passed");
-    console.log("   - Invalid Login Handling: ✅ Passed");
-  } catch (error) {
-    console.error("❌ Test failed:", error.message);
-
-    // Take screenshot on failure
-    await page.screenshot({
-      path: `error-screenshot-${Date.now()}.png`,
-      fullPage: true,
-    });
-
-    throw error;
-  } finally {
-    // Wait before closing (for visual confirmation)
-    await page.waitForTimeout(2000);
-    await browser.close();
-  }
-}
-
-module.exports = { testMagentoFlows };
+if __name__ == "__main__":
+    test_magento_flows()
